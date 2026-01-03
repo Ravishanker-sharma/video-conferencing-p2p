@@ -1,8 +1,11 @@
 import cv2
 
+import threading
+
 class VideoCamera:
     """
     Handles video capture from the webcam using OpenCV.
+    Thread-safe.
     """
     def __init__(self, source=0):
         self.cap = cv2.VideoCapture(source)
@@ -12,22 +15,24 @@ class VideoCamera:
         # Set resolution to 640x480
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.lock = threading.Lock()
 
     def get_frame(self):
         """
         Reads a frame from the camera, resizing if necessary.
         Returns the raw frame (numpy array) or None if failed.
         """
-        if not self.cap.isOpened():
-            return None
+        with self.lock:
+            if not self.cap.isOpened():
+                return None
+                
+            ret, frame = self.cap.read()
+            if not ret:
+                return None
             
-        ret, frame = self.cap.read()
-        if not ret:
-            return None
-            
-        # Ensure frame is resized to standard size
-        frame = cv2.resize(frame, (640, 480))
-        return frame
+            # Ensure frame is resized to standard size
+            frame = cv2.resize(frame, (640, 480))
+            return frame
 
     def release(self):
         """
