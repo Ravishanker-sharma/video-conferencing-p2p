@@ -32,24 +32,26 @@ class VideoWindow(QMainWindow):
         # Top Controls
         self.controls_layout = QHBoxLayout()
         
-        self.ip_input = QLineEdit("127.0.0.1")
-        self.ip_input.setPlaceholderText("Remote IP")
+        self.ip_input = QLineEdit("c0aaeec3f161.ngrok-free.app")
+        self.ip_input.setPlaceholderText("Host Address (IP or URL)")
+        self.ip_input.setFixedWidth(200)
         
         self.port_input = QLineEdit("9999")
         self.port_input.setPlaceholderText("Port")
-        self.port_input.setFixedWidth(80)
+        self.port_input.setFixedWidth(60)
 
         self.btn_host = QPushButton("Start as Host")
         self.btn_host.clicked.connect(self.start_host)
 
-        self.btn_connect = QPushButton("Connect to Host")
+        self.btn_connect = QPushButton("Connect Check")
         self.btn_connect.clicked.connect(self.start_client)
+        self.btn_connect.setText("Connect")
         
         self.btn_stop = QPushButton("End Call")
         self.btn_stop.clicked.connect(self.stop_connection)
         self.btn_stop.setEnabled(False)
 
-        self.controls_layout.addWidget(QLabel("IP:"))
+        self.controls_layout.addWidget(QLabel("Addr:"))
         self.controls_layout.addWidget(self.ip_input)
         self.controls_layout.addWidget(QLabel("Port:"))
         self.controls_layout.addWidget(self.port_input)
@@ -119,16 +121,27 @@ class VideoWindow(QMainWindow):
         self.connection_manager.start_host(port)
 
     def start_client(self):
-        ip = self.ip_input.text()
+        addr = self.ip_input.text().strip()
         port_str = self.port_input.text()
-        if not port_str.isdigit():
-            QMessageBox.warning(self, "Input Error", "Port must be a number.")
-            return
+        
+        if not addr:
+             QMessageBox.warning(self, "Input Error", "Address is required.")
+             return
 
-        port = int(port_str)
-        self.status_label.setText(f"Status: Connecting to {ip}:{port}...")
+        # Construct WebSocket URI
+        # Heuristic: if it looks like an ngrok address (no periods or just alphanumeric), or user forgot protocol
+        if "://" not in addr:
+             # If port is 443 or user implies secure, default to wss://, else ws://
+             if "ngrok" in addr:
+                 uri = f"wss://{addr}"
+             else:
+                 uri = f"ws://{addr}:{port_str}"
+        else:
+             uri = addr
+             
+        self.status_label.setText(f"Status: Connecting to {uri}...")
         self.set_ui_connected(False)
-        self.connection_manager.start_client(ip, port)
+        self.connection_manager.start_client(uri)
 
     def stop_connection(self):
         self.connection_manager.stop_connection()

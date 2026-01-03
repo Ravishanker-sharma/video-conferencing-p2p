@@ -1,15 +1,16 @@
-import socket
+import asyncio
 import threading
-import struct
+import websockets
+import cv2
 import time
 from PyQt6.QtCore import QObject, pyqtSignal
-from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtGui import QImage
 import utils
 
 class ConnectionManager(QObject):
     """
-    Manages the P2P connection, including hosting, connecting,
-    and handling the send/receive threads.
+    Manages the P2P connection using WebSockets.
+    Runs an asyncio loop in a separate thread.
     """
     connected = pyqtSignal()
     disconnected = pyqtSignal()
@@ -18,139 +19,141 @@ class ConnectionManager(QObject):
 
     def __init__(self):
         super().__init__()
-        self.sock = None
-        self.server_sock = None
-        self.send_thread = None
-        self.recv_thread = None
+        self.loop = None
+        self.thread = None
         self.running = False
         self.video_camera = None
+        self.websocket = None
 
     def set_camera(self, camera):
         self.video_camera = camera
 
     def start_host(self, port):
         """
-        Starts the socket server and waits for a client connection.
-        Runs in a separate thread to avoid blocking UI.
+        Starts a WebSocket server on localhost:port.
         """
-        threading.Thread(target=self._host_connection, args=(port,), daemon=True).start()
-
-    def _host_connection(self, port):
-        try:
-            self.server_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.server_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_sock.bind(('0.0.0.0', port))
-            self.server_sock.listen(1)
-            
-            # Accept only one connection
-            self.sock, addr = self.server_sock.accept()
-            self._start_streaming()
-            
-        except Exception as e:
-            self.error.emit(f"Host Error: {e}")
-            self.stop_connection()
-
-    def start_client(self, ip, port):
-        """
-        Connects to a host.
-        Runs in a separate thread to avoid blocking UI.
-        """
-        threading.Thread(target=self._client_connection, args=(ip, port), daemon=True).start()
-
-    def _client_connection(self, ip, port):
-        try:
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.sock.connect((ip, port))
-            self._start_streaming()
-        except Exception as e:
-            self.error.emit(f"Client Error: {e}")
-            self.stop_connection()
-
-    def _start_streaming(self):
         self.running = True
-        self.connected.emit()
+        self.thread = threading.Thread(target=self._run_server_loop, args=(port,), daemon=True)
+        self.thread.start()
 
-        # Start Send Thread
-        self.send_thread = threading.Thread(target=self._send_loop, daemon=True)
-        self.send_thread.start()
-
-        # Start Receive Thread
-        self.recv_thread = threading.Thread(target=self._recv_loop, daemon=True)
-        self.recv_thread.start()
-
-    def _send_loop(self):
-        while self.running and self.sock:
-            try:
-                frame = self.video_camera.get_frame()
-                if frame is not None:
-                    # Encode frame
-                    jpeg_bytes = utils.encode_frame(frame)
-                    
-                    # Prepare header (4 bytes length, big-endian)
-                    length = len(jpeg_bytes)
-                    header = struct.pack('!I', length)
-                    
-                    # Send Header + Data
-                    utils.send_all(self.sock, header + jpeg_bytes)
-                
-                # Limit FPS to ~15
-                time.sleep(0.066)
-            except Exception as e:
-                # print(f"Send Error: {e}")
-                self.stop_connection()
-                break
-
-    def _recv_loop(self):
-        while self.running and self.sock:
-            try:
-                # Read 4-byte header
-                header = utils.recv_all(self.sock, 4)
-                if not header:
-                    break
-                
-                # Unpack length
-                length = struct.unpack('!I', header)[0]
-                
-                # Read frame data
-                frame_data = utils.recv_all(self.sock, length)
-                if not frame_data:
-                    break
-                    
-                # Decode frame
-                frame = utils.decode_frame(frame_data)
-                
-                # Convert to QImage for PyQt
-                height, width, channel = frame.shape
-                bytes_per_line = 3 * width
-                # OpenCV is BGR, PyQt needs RGB
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                q_img = QImage(frame_rgb.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
-                
-                self.new_frame_received.emit(q_img)
-                
-            except Exception as e:
-                # print(f"Recv Error: {e}")
-                self.stop_connection()
-                break
-        
-        # If loop exits, disconnect
-        if self.running:
-            self.stop_connection()
+    def start_client(self, uri):
+        """
+        Connects to a WebSocket server at uri.
+        """
+        self.running = True
+        self.thread = threading.Thread(target=self._run_client_loop, args=(uri,), daemon=True)
+        self.thread.start()
 
     def stop_connection(self):
         self.running = False
-        if self.sock:
-            try:
-                self.sock.close()
-            except:
-                pass
-            self.sock = None
-            
-        if self.server_sock:
-            try:
-                self.server_sock.close()
-            except:
-                pass
-            self.server_sock = None
-            
+        # The loop will check 'running' flag or we can cancel tasks,
+        # but for simplicity we rely on the loops checking self.running or breaking on close.
+        if self.websocket:
+            asyncio.run_coroutine_threadsafe(self.websocket.close(), self.loop)
         self.disconnected.emit()
+
+    def _run_server_loop(self, port):
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        
+        start_server = websockets.serve(self._handle_connection, "0.0.0.0", port)
+        
+        try:
+            self.loop.run_until_complete(start_server)
+            self.loop.run_forever()
+        except Exception as e:
+            self.error.emit(f"Server Error: {e}")
+        finally:
+            self.loop.close()
+
+    async def _handle_connection(self, websocket):
+        self.websocket = websocket
+        self.connected.emit()
+        
+        # Start sender task
+        sender_task = asyncio.create_task(self._sender(websocket))
+        
+        # Receiver loop (this coroutine acts as receiver)
+        try:
+            async for message in websocket:
+                if not self.running:
+                    break
+                self._process_frame(message)
+        except websockets.exceptions.ConnectionClosed:
+            pass
+        except Exception as e:
+            self.error.emit(f"Receive Error: {e}")
+        finally:
+            self.running = False
+            sender_task.cancel()
+            self.disconnected.emit()
+
+    def _run_client_loop(self, uri):
+        self.loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_until_complete(self._client_handler(uri))
+        self.loop.close()
+
+    async def _client_handler(self, uri):
+        try:
+            async with websockets.connect(uri) as websocket:
+                self.websocket = websocket
+                self.connected.emit()
+                
+                # Start sender task
+                sender_task = asyncio.create_task(self._sender(websocket))
+                
+                # Receiver loop
+                try:
+                    async for message in websocket:
+                        if not self.running:
+                            break
+                        self._process_frame(message)
+                except websockets.exceptions.ConnectionClosed:
+                    pass
+                finally:
+                    sender_task.cancel()
+
+        except Exception as e:
+            self.error.emit(f"Client Connection Error: {e}")
+        finally:
+            self.running = False
+            self.disconnected.emit()
+
+    async def _sender(self, websocket):
+        """
+        Continuously captures and sends frames.
+        """
+        while self.running:
+            try:
+                frame = self.video_camera.get_frame()
+                if frame is not None:
+                    jpeg_bytes = utils.encode_frame(frame)
+                    await websocket.send(jpeg_bytes)
+                
+                # ~15 FPS
+                await asyncio.sleep(0.066)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                # print(f"Send Error: {e}")
+                break
+
+    def _process_frame(self, frame_data):
+        """
+        Decodes a received frame and emits it.
+        """
+        try:
+            frame = utils.decode_frame(frame_data)
+            if frame is None:
+                return
+
+            height, width, channel = frame.shape
+            bytes_per_line = 3 * width
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            q_img = QImage(frame_rgb.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+            
+            # emit must be thread-safe (signals are)
+            self.new_frame_received.emit(q_img)
+        except Exception as e:
+            print(f"Frame Decode Error: {e}")
