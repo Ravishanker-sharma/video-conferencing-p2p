@@ -137,7 +137,13 @@ class VideoWindow(QMainWindow):
              else:
                  uri = f"ws://{addr}:{port_str}"
         else:
-             uri = addr
+             # Auto-convert http->ws and https->wss
+             if addr.startswith("https://"):
+                 uri = addr.replace("https://", "wss://", 1)
+             elif addr.startswith("http://"):
+                 uri = addr.replace("http://", "ws://", 1)
+             else:
+                 uri = addr
              
         self.status_label.setText(f"Status: Connecting to {uri}...")
         self.set_ui_connected(False)

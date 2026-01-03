@@ -56,15 +56,19 @@ class ConnectionManager(QObject):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
         
-        start_server = websockets.serve(self._handle_connection, "0.0.0.0", port)
-        
         try:
-            self.loop.run_until_complete(start_server)
-            self.loop.run_forever()
+            self.loop.run_until_complete(self._serve_forever(port))
         except Exception as e:
             self.error.emit(f"Server Error: {e}")
         finally:
             self.loop.close()
+
+    async def _serve_forever(self, port):
+        # We use 'async with' to manage the server lifecycle properly
+        async with websockets.serve(self._handle_connection, "0.0.0.0", port):
+            # Keep the server running until cancelled
+            await asyncio.Future()
+
 
     async def _handle_connection(self, websocket):
         self.websocket = websocket
