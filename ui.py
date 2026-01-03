@@ -103,7 +103,7 @@ class VideoWindow(QMainWindow):
             height, width, channel = frame.shape
             bytes_per_line = 3 * width
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            q_img = QImage(rgb_frame.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+            q_img = QImage(rgb_frame.data, width, height, bytes_per_line, QImage.Format.Format_RGB888).copy()
             self.local_video_label.setPixmap(QPixmap.fromImage(q_img).scaled(480, 360, Qt.AspectRatioMode.KeepAspectRatio))
 
     def update_remote_frame(self, q_img):

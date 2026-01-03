@@ -155,7 +155,9 @@ class ConnectionManager(QObject):
             height, width, channel = frame.shape
             bytes_per_line = 3 * width
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            q_img = QImage(frame_rgb.data, width, height, bytes_per_line, QImage.Format.Format_RGB888)
+            # MUST copy() the image, because QImage(data, ...) uses the buffer directly.
+            # If we don't copy, 'frame_rgb' is GC'd after this function ends, causing a Segfault.
+            q_img = QImage(frame_rgb.data, width, height, bytes_per_line, QImage.Format.Format_RGB888).copy()
             
             # emit must be thread-safe (signals are)
             self.new_frame_received.emit(q_img)
