@@ -93,12 +93,17 @@ class ConnectionManager(QObject):
         async with websockets.serve(self._handle_video_connection, "0.0.0.0", v_port) as server_v, \
                    websockets.serve(self._handle_audio_connection, "0.0.0.0", a_port) as server_a:
             
-            # Start sender task (it will wait for connections to appear)
-            sender_task = asyncio.create_task(self._sender_loop())
+            print(f"Server started on Video Port {v_port} and Audio Port {a_port}")
+            # Start sender tasks
+            video_task = asyncio.create_task(self._video_sender_loop())
+            audio_task = asyncio.create_task(self._audio_sender_loop())
             
             # Run forever
-            await asyncio.Future()
-            sender_task.cancel()
+            try:
+                await asyncio.Future()
+            finally:
+                video_task.cancel()
+                audio_task.cancel()
 
     async def _handle_video_connection(self, websocket):
         self.ws_video = websocket
@@ -147,13 +152,16 @@ class ConnectionManager(QObject):
         # Connect to both concurrently
         # We use a TaskGroup or gather, but we want to maintain them.
         
-        sender_task = asyncio.create_task(self._sender_loop())
+        # Connect to both concurrently
+        
+        video_task = asyncio.create_task(self._video_sender_loop())
+        audio_task = asyncio.create_task(self._audio_sender_loop())
 
         async def connect_video():
             try:
-                # Handle ngrok https -> wss conversion if needed, but user might provide wss directly.
-                # Let's assume input is valid WSS/WS.
+                print(f"Connecting Video to {v_uri}")
                 async with websockets.connect(v_uri) as ws:
+                    print("Video Connected!")
                     self.ws_video = ws
                     self.connected.emit()
                     async for message in ws:
@@ -163,10 +171,13 @@ class ConnectionManager(QObject):
                 print(f"Video Connect Error: {e}")
             finally:
                 self.ws_video = None
+                print("Video Disconnected")
 
         async def connect_audio():
             try:
+                print(f"Connecting Audio to {a_uri}")
                 async with websockets.connect(a_uri) as ws:
+                    print("Audio Connected!")
                     self.ws_audio = ws
                     async for message in ws:
                         if not self.running: break
@@ -175,20 +186,23 @@ class ConnectionManager(QObject):
                 print(f"Audio Connect Error: {e}")
             finally:
                 self.ws_audio = None
+                print("Audio Disconnected")
 
         await asyncio.gather(connect_video(), connect_audio())
-        sender_task.cancel()
+        video_task.cancel()
+        audio_task.cancel()
         self.disconnected.emit()
 
     # --- Sender Logic ---
 
-    async def _sender_loop(self):
-        self.start_audio()
-        
+    async def _video_sender_loop(self):
         while self.running:
             try:
-                # Video
                 if self.ws_video:
+                    # Video capture might block, so we run it in executor? 
+                    # Actually get_frame is fast if frame is ready, but blocking if not.
+                    # cv2.read blocks. 
+                    # To be super safe, run in thread. But simple loop might be ok NOW that audio is separate.
                     frame = self.video_camera.get_frame()
                     if frame is not None:
                          # encode with low quality as requested earlier (5)
@@ -198,12 +212,35 @@ class ConnectionManager(QObject):
                         except:
                             pass # Socket might have closed
                 
-                # Audio
+                # Use a small sleep to not hog CPU if no frame or no connection
+                # Frame rate limiting is implicit by camera FPS but we can limit check rate.
+                await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                print(f"Video Sender Error: {e}")
+                break
+
+    async def _audio_sender_loop(self):
+        self.start_audio()
+        while self.running:
+            try:
                 if self.ws_audio:
+                    # Drain queue
                     while not self.audio_queue.empty():
                         audio_data = await self.audio_queue.get()
                         try:
                             await self.ws_audio.send(audio_data)
+                        except:
+                            pass
+                else:
+                    # Drain queue to prevent memory build up if not connected?
+                    # Or keep it buffering?
+                    # If we buffer too much, we get massive latency upon connection.
+                    # Best to drop old audio if not connected.
+                    while not self.audio_queue.empty():
+                        try:
+                            self.audio_queue.get_nowait()
                         except:
                             pass
 
@@ -211,7 +248,7 @@ class ConnectionManager(QObject):
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                print(f"Sender Loop Error: {e}")
+                print(f"Audio Sender Error: {e}")
                 break
 
     # --- Processing ---
