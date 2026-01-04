@@ -32,13 +32,25 @@ class VideoWindow(QMainWindow):
         # Top Controls
         self.controls_layout = QHBoxLayout()
         
-        self.ip_input = QLineEdit("c0aaeec3f161.ngrok-free.app")
-        self.ip_input.setPlaceholderText("Host Address (IP or URL)")
-        self.ip_input.setFixedWidth(200)
-        
-        self.port_input = QLineEdit("9999")
-        self.port_input.setPlaceholderText("Port")
-        self.port_input.setFixedWidth(60)
+        # Host Inputs (Ports)
+        self.host_layout = QVBoxLayout()
+        self.video_port_input = QLineEdit("9000")
+        self.video_port_input.setPlaceholderText("Video Port")
+        self.audio_port_input = QLineEdit("9001")
+        self.audio_port_input.setPlaceholderText("Audio Port")
+        self.host_layout.addWidget(QLabel("Host Ports (Video / Audio):"))
+        self.host_layout.addWidget(self.video_port_input)
+        self.host_layout.addWidget(self.audio_port_input)
+
+        # Client Inputs (URIs)
+        self.client_layout = QVBoxLayout()
+        self.video_uri_input = QLineEdit("ws://localhost:9000")
+        self.video_uri_input.setPlaceholderText("Video URI (ws://...)")
+        self.audio_uri_input = QLineEdit("ws://localhost:9001")
+        self.audio_uri_input.setPlaceholderText("Audio URI (ws://...)")
+        self.client_layout.addWidget(QLabel("Client URIs (Video / Audio):"))
+        self.client_layout.addWidget(self.video_uri_input)
+        self.client_layout.addWidget(self.audio_uri_input)
 
         self.btn_host = QPushButton("Start as Host")
         self.btn_host.clicked.connect(self.start_host)
@@ -57,13 +69,15 @@ class VideoWindow(QMainWindow):
         self.check_mute_speaker = QCheckBox("Mute Speaker")
         self.check_mute_speaker.toggled.connect(self.toggle_speaker)
 
-        self.controls_layout.addWidget(QLabel("Addr:"))
-        self.controls_layout.addWidget(self.ip_input)
-        self.controls_layout.addWidget(QLabel("Port:"))
-        self.controls_layout.addWidget(self.port_input)
+        self.controls_layout.addLayout(self.host_layout)
         self.controls_layout.addWidget(self.btn_host)
+        
+        # Spacer
+        self.controls_layout.addSpacing(20)
+        
+        self.controls_layout.addLayout(self.client_layout)
         self.controls_layout.addWidget(self.btn_connect)
-        self.controls_layout.addWidget(self.btn_connect)
+        
         self.controls_layout.addWidget(self.btn_stop)
         self.controls_layout.addWidget(self.check_mute_mic)
         self.controls_layout.addWidget(self.check_mute_speaker)
@@ -119,44 +133,42 @@ class VideoWindow(QMainWindow):
         self.remote_video_label.setPixmap(QPixmap.fromImage(q_img).scaled(480, 360, Qt.AspectRatioMode.KeepAspectRatio))
 
     def start_host(self):
-        port_str = self.port_input.text()
-        if not port_str.isdigit():
-            QMessageBox.warning(self, "Input Error", "Port must be a number.")
+        v_port_str = self.video_port_input.text()
+        a_port_str = self.audio_port_input.text()
+        
+        if not v_port_str.isdigit() or not a_port_str.isdigit():
+            QMessageBox.warning(self, "Input Error", "Ports must be numbers.")
             return
-            
-        port = int(port_str)
-        self.status_label.setText(f"Status: Listening on port {port}...")
-        self.set_ui_connected(False) # Disable connect buttons
-        self.connection_manager.start_host(port)
+
+        v_port = int(v_port_str)
+        a_port = int(a_port_str)
+        
+        self.status_label.setText(f"Status: Hosting on Ports {v_port} (Video) & {a_port} (Audio)...")
+        self.set_ui_connected(False) 
+        self.connection_manager.start_host(v_port, a_port)
 
     def start_client(self):
-        addr = self.ip_input.text().strip()
-        port_str = self.port_input.text()
-        
-        if not addr:
-             QMessageBox.warning(self, "Input Error", "Address is required.")
-             return
+        v_uri = self.video_uri_input.text().strip()
+        a_uri = self.audio_uri_input.text().strip()
 
-        # Construct WebSocket URI
-        # Heuristic: if it looks like an ngrok address (no periods or just alphanumeric), or user forgot protocol
-        if "://" not in addr:
-             # If port is 443 or user implies secure, default to wss://, else ws://
-             if "ngrok" in addr:
-                 uri = f"wss://{addr}"
-             else:
-                 uri = f"ws://{addr}:{port_str}"
-        else:
-             # Auto-convert http->ws and https->wss
-             if addr.startswith("https://"):
-                 uri = addr.replace("https://", "wss://", 1)
-             elif addr.startswith("http://"):
-                 uri = addr.replace("http://", "ws://", 1)
-             else:
-                 uri = addr
+        if not v_uri or not a_uri:
+             QMessageBox.warning(self, "Input Error", "Both URIs are required.")
+             return
              
-        self.status_label.setText(f"Status: Connecting to {uri}...")
+        # Helper to fix common protocol omissions
+        def fix_uri(u):
+            if "://" not in u:
+                return "ws://" + u
+            if u.startswith("https://"): return u.replace("https://", "wss://", 1)
+            if u.startswith("http://"): return u.replace("http://", "ws://", 1)
+            return u
+
+        v_uri = fix_uri(v_uri)
+        a_uri = fix_uri(a_uri)
+
+        self.status_label.setText(f"Status: Connecting...")
         self.set_ui_connected(False)
-        self.connection_manager.start_client(uri)
+        self.connection_manager.start_client(v_uri, a_uri)
 
     def stop_connection(self):
         self.connection_manager.stop_connection()
