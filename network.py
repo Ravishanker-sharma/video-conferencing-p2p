@@ -44,7 +44,11 @@ class ConnectionManager(QObject):
 
     def on_audio_input(self, data):
         if self.loop and self.running:
-             self.loop.call_soon_threadsafe(self.audio_queue.put_nowait, data)
+            try:
+                self.loop.call_soon_threadsafe(self.audio_queue.put_nowait, data)
+            except RuntimeError:
+                # Loop might be closed during shutdown
+                pass
 
     def start_host(self, video_port, audio_port):
         """
