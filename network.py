@@ -162,7 +162,8 @@ class ConnectionManager(QObject):
                 # Check video
                 frame = self.video_camera.get_frame()
                 if frame is not None:
-                    jpeg_bytes = utils.encode_frame(frame)
+                    # Encode
+                    jpeg_bytes = utils.encode_frame(frame, quality=20)
                     # Prefix 'V' for video
                     await websocket.send(b'V' + jpeg_bytes)
 
