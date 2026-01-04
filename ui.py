@@ -1,7 +1,7 @@
 import sys
 import cv2
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QLineEdit, QPushButton, QMessageBox)
+                             QLabel, QLineEdit, QPushButton, QMessageBox, QCheckBox)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap
 
@@ -51,13 +51,22 @@ class VideoWindow(QMainWindow):
         self.btn_stop.clicked.connect(self.stop_connection)
         self.btn_stop.setEnabled(False)
 
+        self.check_mute_mic = QCheckBox("Mute Mic")
+        self.check_mute_mic.toggled.connect(self.toggle_mic)
+        
+        self.check_mute_speaker = QCheckBox("Mute Speaker")
+        self.check_mute_speaker.toggled.connect(self.toggle_speaker)
+
         self.controls_layout.addWidget(QLabel("Addr:"))
         self.controls_layout.addWidget(self.ip_input)
         self.controls_layout.addWidget(QLabel("Port:"))
         self.controls_layout.addWidget(self.port_input)
         self.controls_layout.addWidget(self.btn_host)
         self.controls_layout.addWidget(self.btn_connect)
+        self.controls_layout.addWidget(self.btn_connect)
         self.controls_layout.addWidget(self.btn_stop)
+        self.controls_layout.addWidget(self.check_mute_mic)
+        self.controls_layout.addWidget(self.check_mute_speaker)
         
         self.layout.addLayout(self.controls_layout)
 
@@ -151,6 +160,17 @@ class VideoWindow(QMainWindow):
 
     def stop_connection(self):
         self.connection_manager.stop_connection()
+
+    def toggle_mic(self, checked):
+        # We need to expose this in ConnectionManager/AudioManager
+        # For now, simplistic approach: set a flag in audio manager if accessible, 
+        # or handle in ConnectionManager on_audio_input.
+        # But wait, audio_manager is private in ConnectionManager.
+        # Let's add a method to ConnectionManager.
+        self.connection_manager.set_mic_mute(checked)
+
+    def toggle_speaker(self, checked):
+        self.connection_manager.set_speaker_mute(checked)
 
     def on_connected(self):
         self.status_label.setText("Status: CONNECTED")

@@ -6,6 +6,7 @@ import time
 from PyQt6.QtCore import QObject, pyqtSignal
 from PyQt6.QtGui import QImage
 import utils
+import audio
 
 class ConnectionManager(QObject):
     """
@@ -24,11 +25,32 @@ class ConnectionManager(QObject):
         self.running = False
         self.video_camera = None
         self.websocket = None
+        self.audio_manager = audio.AudioManager()
+        self.audio_queue = asyncio.Queue()
+
 
     def set_camera(self, camera):
         self.video_camera = camera
 
-    def start_host(self, port):
+    def set_mic_mute(self, muted):
+        self.audio_manager.is_mic_muted = muted
+
+    def set_speaker_mute(self, muted):
+        self.audio_manager.is_speaker_muted = muted
+    
+    def start_audio(self):
+        # Start audio streams and hook up callback
+        self.audio_manager.start_streams(self.on_audio_input)
+
+    def on_audio_input(self, data):
+        if self.loop and self.running:
+             # Thread-safe put into async queue
+             self.loop.call_soon_threadsafe(self.audio_queue.put_nowait, data)
+
+    def stop_connection(self):
+        self.running = False
+        self.audio_manager.stop_streams()
+        # The loop will check 'running' flag or we can cancel tasks,
         """
         Starts a WebSocket server on localhost:port.
         """
@@ -82,7 +104,7 @@ class ConnectionManager(QObject):
             async for message in websocket:
                 if not self.running:
                     break
-                self._process_frame(message)
+                self._process_message(message)
         except websockets.exceptions.ConnectionClosed:
             pass
         except Exception as e:
@@ -112,7 +134,7 @@ class ConnectionManager(QObject):
                     async for message in websocket:
                         if not self.running:
                             break
-                        self._process_frame(message)
+                        self._process_message(message)
                 except websockets.exceptions.ConnectionClosed:
                     pass
                 finally:
@@ -126,22 +148,60 @@ class ConnectionManager(QObject):
 
     async def _sender(self, websocket):
         """
-        Continuously captures and sends frames.
+        Continuously captures and sends frames and audio.
         """
+        # Start audio hardware
+        self.start_audio()
+
         while self.running:
             try:
+                # 1. Video Frame
+                # We throttle video to ~15 FPS
+                # But we can't block audio. So we should probably decouple them or run them concurrently.
+                # Simplest concurrency: check both in a loop with small sleep, or use separate tasks.
+                # For simplicity in this single-loop structure:
+                
+                # Check video
                 frame = self.video_camera.get_frame()
                 if frame is not None:
                     jpeg_bytes = utils.encode_frame(frame)
-                    await websocket.send(jpeg_bytes)
+                    # Prefix 'V' for video
+                    await websocket.send(b'V' + jpeg_bytes)
+
+                # Check audio queue - flush all available
+                while not self.audio_queue.empty():
+                    audio_data = await self.audio_queue.get()
+                    # Prefix 'A' for audio
+                    await websocket.send(b'A' + audio_data)
                 
-                # ~15 FPS
-                await asyncio.sleep(0.066)
+                # Sleep a bit to control video FPS, but this might add latency to audio if too long.
+                # 0.066 is ~15ms, which is fine for audio chunks (usually 20ms+).
+                # But to keep audio smooth, we might want a tighter loop or separate task.
+                # Let's reduce sleep and use a timer for video capture if needed, 
+                # or just accept that we check video every loop.
+                # Better: Wait small amount, enabling high reactive loop
+                await asyncio.sleep(0.01)
+                
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 # print(f"Send Error: {e}")
                 break
+
+    def _process_message(self, message):
+        """
+        Decodes a received message and routes it.
+        """
+        try:
+            msg_type = message[0:1] # First byte
+            payload = message[1:]
+
+            if msg_type == b'V':
+                self._process_frame(payload)
+            elif msg_type == b'A':
+                self.audio_manager.write_audio(payload)
+        except Exception as e:
+            print(f"Message Processing Error: {e}")
 
     def _process_frame(self, frame_data):
         """

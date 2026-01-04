@@ -2,3 +2,5 @@ opencv-python
 PyQt6
 numpy
 websockets
+
+PyAudio
