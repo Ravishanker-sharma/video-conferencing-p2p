@@ -47,10 +47,7 @@ class ConnectionManager(QObject):
              # Thread-safe put into async queue
              self.loop.call_soon_threadsafe(self.audio_queue.put_nowait, data)
 
-    def stop_connection(self):
-        self.running = False
-        self.audio_manager.stop_streams()
-        # The loop will check 'running' flag or we can cancel tasks,
+    def start_host(self, port):
         """
         Starts a WebSocket server on localhost:port.
         """
@@ -68,6 +65,7 @@ class ConnectionManager(QObject):
 
     def stop_connection(self):
         self.running = False
+        self.audio_manager.stop_streams()
         # The loop will check 'running' flag or we can cancel tasks,
         # but for simplicity we rely on the loops checking self.running or breaking on close.
         if self.websocket:
