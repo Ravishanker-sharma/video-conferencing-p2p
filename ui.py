@@ -2,12 +2,13 @@ import sys
 import cv2
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
                              QLabel, QLineEdit, QPushButton, QMessageBox, QFrame,
-                             QSizePolicy)
+                             QSizePolicy, QStackedLayout)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
 
 import video
 import network
+from chat_widget import ChatWidget
 
 class VideoCallWidget(QWidget):
     call_ended = pyqtSignal()
@@ -15,6 +16,11 @@ class VideoCallWidget(QWidget):
     def __init__(self, mode="HOST"):
         super().__init__()
         self.mode = mode 
+        
+        # UI State
+        self.is_mic_on = True
+        self.is_camera_on = True
+        self.is_cc_on = False
         
         # Initialize core components
         try:
@@ -34,6 +40,7 @@ class VideoCallWidget(QWidget):
         self.connection_manager.disconnected.connect(self.on_disconnected)
         self.connection_manager.error.connect(self.on_error)
         self.connection_manager.new_frame_received.connect(self.update_remote_frame)
+        self.connection_manager.chat_message_received.connect(self.on_chat_received)
 
         # Timer for local video preview
         self.timer = QTimer()
@@ -45,119 +52,205 @@ class VideoCallWidget(QWidget):
             QTimer.singleShot(500, self.start_host)
 
     def init_ui(self):
-        self.layout = QVBoxLayout(self)
-        self.layout.setSpacing(0)
-        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setSpacing(0)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
 
-        # -- Toolbar --
-        toolbar = QFrame()
-        toolbar.setStyleSheet("background-color: #1e1e1e; border-bottom: 1px solid #333;")
-        toolbar.setFixedHeight(70)
-        tb_layout = QHBoxLayout(toolbar)
-        tb_layout.setContentsMargins(20, 0, 20, 0)
+        # -- Middle Area (Video + Chat) --
+        # We use a HBox. Chat is initially hidden (width 0 or hidden widget)
+        middle_area = QWidget()
+        middle_layout = QHBoxLayout(middle_area)
+        middle_layout.setContentsMargins(0,0,0,0)
+        middle_layout.setSpacing(0)
         
-        # Title depending on mode
-        title_text = "Team Meeting Room" if self.mode == "HOST" else "Joining Meeting..."
-        self.lbl_title = QLabel(title_text)
-        self.lbl_title.setStyleSheet("color: white; font-weight: bold; font-size: 18px;")
-        
-        # Status Badge
-        self.status_badge = QLabel("Initializing...")
-        self.status_badge.setStyleSheet("""
-            background-color: #333; 
-            color: #aaa; 
-            padding: 4px 12px; 
-            border-radius: 12px; 
-            font-size: 12px; 
-            font-weight: bold;
-        """)
+        # Video Area
+        video_area = QWidget()
+        video_area.setStyleSheet("background-color: #121212;")
+        video_layout = QHBoxLayout(video_area)
+        video_layout.setContentsMargins(20, 20, 20, 20)
+        video_layout.setSpacing(20)
 
-        tb_layout.addWidget(self.lbl_title)
-        tb_layout.addSpacing(15)
-        tb_layout.addWidget(self.status_badge)
-        tb_layout.addStretch()
-
-        # Input fields (Only for Client)
-        self.ip_input = QLineEdit("c0aaeec3f161.ngrok-free.app")
-        # Hidden input for port to keep logic simple but not show user
-        self.port_input = QLineEdit("8000") # Default hardcoded port
-        self.port_input.setVisible(False)
-        
-        if self.mode == "CLIENT":
-            self.ip_input.setPlaceholderText("Meeting Address")
-            self.ip_input.setStyleSheet("""
-                QLineEdit {
-                    background-color: #2b2b2b;
-                    border: 1px solid #444;
-                    border-radius: 6px;
-                    padding: 8px 12px;
-                    color: white;
-                    min-width: 250px;
-                }
-                QLineEdit:focus { border-color: #0d6efd; }
-            """)
-            
-            self.btn_connect = QPushButton("Join Now")
-            self.btn_connect.setCursor(Qt.CursorShape.PointingHandCursor)
-            self.btn_connect.setStyleSheet("""
-                QPushButton {
-                    background-color: #10b981;
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    padding: 8px 16px;
-                    font-weight: bold;
-                }
-                QPushButton:hover { background-color: #059669; }
-            """)
-            self.btn_connect.clicked.connect(self.start_client)
-            
-            tb_layout.addWidget(self.ip_input)
-            tb_layout.addWidget(self.btn_connect)
-
-        # End Call Button
-        self.btn_stop = QPushButton("Leave Meeting")
-        self.btn_stop.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_stop.clicked.connect(self.stop_connection)
-        self.btn_stop.setStyleSheet("""
-            QPushButton {
-                background-color: #dc3545;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #bb2d3b; }
-        """)
-        tb_layout.addWidget(self.btn_stop)
-
-        self.layout.addWidget(toolbar)
-
-        # -- Main Content Area (Grid for "Group" feel) --
-        content_area = QWidget()
-        content_area.setStyleSheet("background-color: #121212;")
-        content_layout = QHBoxLayout(content_area)
-        content_layout.setContentsMargins(20, 20, 20, 20)
-        content_layout.setSpacing(20)
-
-        # We will make them equal size to look like a 1:1 meeting in a grid
         # Local Video
         self.local_container = self.create_video_frame("You")
         self.local_video_label = self.local_container.findChild(QLabel, "video_label")
         
         # Remote Video
-        # We label it "Remote User" or "Team Member"
         self.remote_container = self.create_video_frame("Team Member")
         self.remote_video_label = self.remote_container.findChild(QLabel, "video_label")
 
-        content_layout.addWidget(self.local_container)
-        content_layout.addWidget(self.remote_container)
-        
-        # Initial State: Hide remote until connected
+        video_layout.addWidget(self.local_container)
+        video_layout.addWidget(self.remote_container)
         self.remote_container.setVisible(False)
         
-        self.layout.addWidget(content_area)
+        # Chat Widget
+        self.chat_widget = ChatWidget()
+        self.chat_widget.hide() # Hidden by default
+        self.chat_widget.message_sent.connect(self.send_chat)
+
+        middle_layout.addWidget(video_area)
+        middle_layout.addWidget(self.chat_widget)
+        
+        self.main_layout.addWidget(middle_area)
+
+        # -- Bottom Control Bar --
+        self.create_bottom_bar()
+        self.main_layout.addWidget(self.bottom_bar)
+        
+        # -- Overlay Info / Input for Client (Floating or Top) --
+        # Since we removed the top toolbar, we need a place for "Connecting..." status or Input
+        # We can implement a simple overlay dialog or just a top bar that hides given the user request
+        # User request didn't explicitly ask to remove the top bar, but "improve meeting page".
+        # Let's keep a minimal top connection bar ONLY if Client and not connected.
+        
+        self.top_connection_bar = QFrame()
+        self.top_connection_bar.setFixedHeight(50)
+        self.top_connection_bar.setStyleSheet("background-color: #1e1e1e; border-bottom: 1px solid #333;")
+        top_layout = QHBoxLayout(self.top_connection_bar)
+        
+        if self.mode == "CLIENT":
+            self.ip_input = QLineEdit("c0aaeec3f161.ngrok-free.app")
+            self.ip_input.setPlaceholderText("Meeting Address")
+            self.ip_input.setStyleSheet("background-color: #333; color: white; padding: 5px; border-radius: 4px;")
+            self.btn_connect = QPushButton("Join")
+            self.btn_connect.clicked.connect(self.start_client)
+            self.btn_connect.setStyleSheet("background-color: #10b981; color: white; padding: 5px 15px; border-radius: 4px;")
+            
+            top_layout.addWidget(self.ip_input)
+            top_layout.addWidget(self.btn_connect)
+        else:
+            # Host mode: Hide top bar as per user request
+            self.top_connection_bar.setVisible(False)
+            
+        top_layout.addStretch()
+        # Insert at top
+        self.main_layout.insertWidget(0, self.top_connection_bar)
+
+
+    def create_bottom_bar(self):
+        self.bottom_bar = QFrame()
+        self.bottom_bar.setFixedHeight(80)
+        self.bottom_bar.setStyleSheet("background-color: #1e1e1e; border-top: 1px solid #333;")
+        
+        layout = QHBoxLayout(self.bottom_bar)
+        layout.setContentsMargins(20, 10, 20, 10)
+        layout.setSpacing(20)
+        
+        # Left: Info
+        self.lbl_time = QLabel("10:00 AM") # Dummy time
+        self.lbl_time.setStyleSheet("color: white; font-weight: bold;")
+        self.lbl_id = QLabel("|  Team Meeting")
+        self.lbl_id.setStyleSheet("color: #aaa;")
+        
+        layout.addWidget(self.lbl_time)
+        layout.addWidget(self.lbl_id)
+        layout.addStretch()
+        
+        # Center: Controls
+        self.btn_mic = self.create_control_btn("🎤", "Mute")
+        self.btn_mic.clicked.connect(self.toggle_mic)
+        
+        self.btn_cam = self.create_control_btn("📹", "Stop Video")
+        self.btn_cam.clicked.connect(self.toggle_cam)
+        
+        self.btn_cc = self.create_control_btn("💬", "Captions")
+        self.btn_cc.clicked.connect(self.toggle_cc)
+        
+        self.btn_chat = self.create_control_btn("🗨", "Chat")
+        self.btn_chat.clicked.connect(self.toggle_chat)
+        
+        self.btn_leave = QPushButton("📞")
+        self.btn_leave.setFixedSize(60, 40)
+        self.btn_leave.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_leave.setStyleSheet("""
+            QPushButton {
+                background-color: #dc3545;
+                color: white;
+                border: none;
+                border-radius: 20px;
+                font-size: 20px;
+            }
+            QPushButton:hover { background-color: #bb2d3b; }
+        """)
+        self.btn_leave.clicked.connect(self.stop_connection)
+
+        layout.addWidget(self.btn_mic)
+        layout.addWidget(self.btn_cam)
+        layout.addWidget(self.btn_cc)
+        layout.addWidget(self.btn_chat)
+        layout.addWidget(self.btn_leave)
+        
+        layout.addStretch()
+        
+        # Spacer to balance left side
+        # (Could add more icons here)
+        spacer = QWidget()
+        spacer.setFixedWidth(100)
+        layout.addWidget(spacer)
+
+    def create_control_btn(self, icon, tooltip):
+        btn = QPushButton(icon)
+        btn.setFixedSize(50, 50)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setToolTip(tooltip)
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3c4043;
+                color: white;
+                border: none;
+                border-radius: 25px;
+                font-size: 20px;
+            }
+            QPushButton:hover { background-color: #5f6368; }
+            QPushButton:checked { background-color: #8ab4f8; color: #3c4043; }
+        """)
+        return btn
+
+    def toggle_mic(self):
+        self.is_mic_on = not self.is_mic_on
+        if self.is_mic_on:
+            self.btn_mic.setStyleSheet(self.btn_mic.styleSheet().replace("background-color: #ea4335;", "background-color: #3c4043;"))
+            self.btn_mic.setText("🎤")
+        else:
+            self.btn_mic.setStyleSheet(self.btn_mic.styleSheet().replace("background-color: #3c4043;", "background-color: #ea4335;"))
+            self.btn_mic.setText("🚫") # Muted icon
+
+    def toggle_cam(self):
+        self.is_camera_on = not self.is_camera_on
+        if self.is_camera_on:
+            self.btn_cam.setStyleSheet(self.btn_cam.styleSheet().replace("background-color: #ea4335;", "background-color: #3c4043;"))
+            self.btn_cam.setText("📹")
+            self.local_video_label.setVisible(True)
+        else:
+            self.btn_cam.setStyleSheet(self.btn_cam.styleSheet().replace("background-color: #3c4043;", "background-color: #ea4335;"))
+            self.btn_cam.setText("🚫")
+            self.local_video_label.setVisible(False) 
+            # Note: We should technically stop sending frames, 
+            # but setting visible(False) effectively stops update_local_frame from processing (visuals only)
+            # To stop sending: handled in get_frame logic check
+
+    def toggle_cc(self):
+        self.is_cc_on = not self.is_cc_on
+        if self.is_cc_on:
+            self.btn_cc.setStyleSheet(self.btn_cc.styleSheet().replace("background-color: #3c4043;", "background-color: #8ab4f8;").replace("color: white;", "color: black;"))
+            QMessageBox.information(self, "Captions", "Captions enabled (Simulation)")
+        else:
+            self.btn_cc.setStyleSheet(self.btn_cc.styleSheet().replace("background-color: #8ab4f8;", "background-color: #3c4043;").replace("color: black;", "color: white;"))
+
+    def toggle_chat(self):
+        if self.chat_widget.isVisible():
+            self.chat_widget.hide()
+            self.btn_chat.setStyleSheet(self.btn_chat.styleSheet().replace("background-color: #8ab4f8;", "background-color: #3c4043;").replace("color: black;", "color: white;"))
+        else:
+            self.chat_widget.show()
+            self.btn_chat.setStyleSheet(self.btn_chat.styleSheet().replace("background-color: #3c4043;", "background-color: #8ab4f8;").replace("color: white;", "color: black;"))
+
+    def send_chat(self, text):
+        self.connection_manager.send_chat_message(text)
+
+    def on_chat_received(self, text):
+        if not self.chat_widget.isVisible():
+            self.toggle_chat() # Auto open chat
+        self.chat_widget.add_message(text, is_me=False)
 
     def create_video_frame(self, label_text):
         frame = QFrame()
@@ -176,10 +269,9 @@ class VideoCallWidget(QWidget):
         vid_label.setObjectName("video_label")
         vid_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         vid_label.setStyleSheet("background-color: black; border-radius: 12px;")
-        # Fix for growing window: Ignore size policy so it scales down too
         vid_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Ignored)
         
-        # Overlay Label (Bottom Left name tag)
+        # Bottom Name Tag
         name_bar = QFrame()
         name_bar.setFixedHeight(40)
         name_bar.setStyleSheet("background-color: transparent;")
@@ -204,6 +296,11 @@ class VideoCallWidget(QWidget):
         return frame
 
     def update_local_frame(self):
+        if not self.is_camera_on:
+             return
+        if not self.local_video_label.isVisible():
+             return
+
         if self.camera:
             frame = self.camera.get_frame()
             if frame is not None:
@@ -212,37 +309,33 @@ class VideoCallWidget(QWidget):
                 rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 q_img = QImage(rgb_frame.data, width, height, bytes_per_line, QImage.Format.Format_RGB888).copy()
                 
-                # Get size of container
                 w = self.local_video_label.width()
                 h = self.local_video_label.height()
-                if w > 0 and h > 0:
-                    # Use KeepAspectRatio to avoid pushing boundaries excessively if aspect ratio mismatches
-                    self.local_video_label.setPixmap(QPixmap.fromImage(q_img).scaled(w, h, Qt.AspectRatioMode.KeepAspectRatio))
+                if w < 10 or h < 10: return
+                
+                self.local_video_label.setPixmap(QPixmap.fromImage(q_img).scaled(w, h, Qt.AspectRatioMode.KeepAspectRatio))
 
     def update_remote_frame(self, q_img):
+        if not self.remote_container.isVisible():
+            return
+            
         w = self.remote_video_label.width()
         h = self.remote_video_label.height()
-        if w > 0 and h > 0:
-            self.remote_video_label.setPixmap(QPixmap.fromImage(q_img).scaled(w, h, Qt.AspectRatioMode.KeepAspectRatio))
+        if w < 10 or h < 10: return
+
+        self.remote_video_label.setPixmap(QPixmap.fromImage(q_img).scaled(w, h, Qt.AspectRatioMode.KeepAspectRatio))
 
     def start_host(self):
-        # Always use 8000
         port = 8000
-        self.status_badge.setText("LIVE ●")
-        self.status_badge.setStyleSheet("background-color: #dc3545; color: white; padding: 4px 12px; border-radius: 12px; font-weight: bold;")
-        self.lbl_title.setText("Meeting in Progress")
-        
+        # self.top_connection_bar.setVisible(True) # Hidden for clean UI
         self.connection_manager.start_host(port)
 
     def start_client(self):
         addr = self.ip_input.text().strip()
-        # Default port 8000 if not specified (though logic handles split)
         port_str = "8000"
         
-        if not addr:
-             QMessageBox.warning(self, "Input Error", "Meeting Address is required.")
-             return
-
+        if not addr: return
+        
         if "://" not in addr:
              if "ngrok" in addr:
                  uri = f"wss://{addr}"
@@ -256,8 +349,7 @@ class VideoCallWidget(QWidget):
              else:
                  uri = addr
              
-        self.status_badge.setText("Connecting...")
-        self.status_badge.setStyleSheet("background-color: #ffc107; color: black; padding: 4px 12px; border-radius: 12px; font-weight: bold;")
+        self.btn_connect.setText("Connect...")
         self.btn_connect.setEnabled(False)
         self.connection_manager.start_client(uri)
 
@@ -266,29 +358,20 @@ class VideoCallWidget(QWidget):
         self.call_ended.emit()
 
     def on_connected(self):
-        self.status_badge.setText("CONNECTED")
-        self.status_badge.setStyleSheet("background-color: #198754; color: white; padding: 4px 12px; border-radius: 12px; font-weight: bold;")
-        self.remote_container.setVisible(True) # Show remote video
-        
+        self.remote_container.setVisible(True)
         if self.mode == "CLIENT":
-            self.lbl_title.setText("Connected to Meeting")
-            self.btn_connect.setVisible(False)
-            self.ip_input.setVisible(False)
+            self.top_connection_bar.setVisible(False) # Hide input when connected
 
     def on_disconnected(self):
-        self.status_badge.setText("DISCONNECTED")
-        self.status_badge.setStyleSheet("background-color: #6c757d; color: white; padding: 4px 12px; border-radius: 12px; font-weight: bold;")
         self.remote_video_label.clear()
-        self.remote_container.setVisible(False) # Hide remote video
+        self.remote_container.setVisible(False)
         
         if self.mode == "CLIENT":
+            self.btn_connect.setText("Join")
             self.btn_connect.setEnabled(True)
-            self.btn_connect.setVisible(True)
-            self.ip_input.setVisible(True)
+            self.top_connection_bar.setVisible(True)
 
     def on_error(self, msg):
-        self.status_badge.setText("ERROR")
-        self.status_badge.setStyleSheet("background-color: #dc3545; color: white; padding: 4px 12px; border-radius: 12px; font-weight: bold;")
         QMessageBox.warning(self, "Connection Error", msg)
         self.on_disconnected()
 

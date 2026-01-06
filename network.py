@@ -15,6 +15,7 @@ class ConnectionManager(QObject):
     connected = pyqtSignal()
     disconnected = pyqtSignal()
     error = pyqtSignal(str)
+    chat_message_received = pyqtSignal(str)
     new_frame_received = pyqtSignal(QImage)
 
     def __init__(self):
@@ -52,6 +53,14 @@ class ConnectionManager(QObject):
             asyncio.run_coroutine_threadsafe(self.websocket.close(), self.loop)
         self.disconnected.emit()
 
+    def send_chat_message(self, message):
+        """
+        Sends a text message to the peer.
+        """
+        if self.websocket and self.running:
+            # We must schedule the send in the asyncio loop
+            asyncio.run_coroutine_threadsafe(self.websocket.send(message), self.loop)
+
     def _run_server_loop(self, port):
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
@@ -82,7 +91,7 @@ class ConnectionManager(QObject):
             async for message in websocket:
                 if not self.running:
                     break
-                self._process_frame(message)
+                self._process_message(message)
         except websockets.exceptions.ConnectionClosed:
             pass
         except Exception as e:
@@ -112,7 +121,7 @@ class ConnectionManager(QObject):
                     async for message in websocket:
                         if not self.running:
                             break
-                        self._process_frame(message)
+                        self._process_message(message)
                 except websockets.exceptions.ConnectionClosed:
                     pass
                 finally:
@@ -143,12 +152,17 @@ class ConnectionManager(QObject):
                 # print(f"Send Error: {e}")
                 break
 
-    def _process_frame(self, frame_data):
+    def _process_message(self, message):
         """
-        Decodes a received frame and emits it.
+        Decodes a received message (Text or Bytes) and emits it.
         """
         try:
-            frame = utils.decode_frame(frame_data)
+            if isinstance(message, str):
+                self.chat_message_received.emit(message)
+                return
+
+            # Assume binary is video frame
+            frame = utils.decode_frame(message)
             if frame is None:
                 return
 
