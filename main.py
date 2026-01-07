@@ -7,6 +7,7 @@ from ui import VideoCallWidget
 class MainAppWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        print("MainAppWindow.__init__ start")
         self.setWindowTitle("Team Connect")
         self.setGeometry(100, 100, 1000, 700)
         
@@ -15,12 +16,15 @@ class MainAppWindow(QMainWindow):
         self.setCentralWidget(self.stack)
         
         # Initialize Widgets
+        print("Initializing LoginWidget...")
         self.init_login()
         
+        print("Initializing ModeSelectionWidget...")
         self.selection_widget = ModeSelectionWidget()
         self.selection_widget.mode_selected.connect(self.go_to_video)
         
         self.stack.addWidget(self.selection_widget) 
+        print("Widgets initialized.") 
 
         # Global Application Styling (Dark Theme)
         # Replaced custom font with system default to avoid warnings
@@ -65,11 +69,14 @@ class MainAppWindow(QMainWindow):
         event.accept()
 
 def main():
+    print("Starting application...")
     app = QApplication(sys.argv)
     
+    print("Creating window...")
     window = MainAppWindow()
     window.show()
     
+    print("Executing event loop...")
     sys.exit(app.exec())
 
 if __name__ == "__main__":
