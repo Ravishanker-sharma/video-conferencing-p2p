@@ -5,6 +5,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                              QSizePolicy, QStackedLayout)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QImage, QPixmap
+from user_profile import UserProfile
 
 import video
 import network
@@ -51,6 +52,13 @@ class VideoCallWidget(QWidget):
         if self.mode == "HOST":
             QTimer.singleShot(500, self.start_host)
 
+        # Captions State
+        self.captions_lines = [line for line in UserProfile().captions_text.split('\n') if line.strip()]
+        self.current_caption_index = 0
+        self.caption_timer = QTimer()
+        self.caption_timer.timeout.connect(self.cycle_caption)
+        self.caption_timer.setInterval(3000) # 3 seconds per line
+
     def init_ui(self):
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setSpacing(0)
@@ -66,7 +74,13 @@ class VideoCallWidget(QWidget):
         # Video Area
         video_area = QWidget()
         video_area.setStyleSheet("background-color: #121212;")
-        video_layout = QHBoxLayout(video_area)
+        
+        # We need a VBox to put captions at the bottom
+        video_main_layout = QVBoxLayout(video_area)
+        video_main_layout.setContentsMargins(0,0,0,0)
+        
+        # The HBox for video feeds
+        video_layout = QHBoxLayout()
         video_layout.setContentsMargins(20, 20, 20, 20)
         video_layout.setSpacing(20)
 
@@ -81,6 +95,31 @@ class VideoCallWidget(QWidget):
         video_layout.addWidget(self.local_container)
         video_layout.addWidget(self.remote_container)
         self.remote_container.setVisible(False)
+        
+        video_main_layout.addLayout(video_layout)
+        
+        # Captions Label (Overlay style)
+        self.caption_label = QLabel("")
+        self.caption_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.caption_label.setStyleSheet("""
+            QLabel {
+                background-color: rgba(0, 0, 0, 0.7);
+                color: white;
+                font-size: 24px;
+                padding: 10px;
+                border-radius: 8px;
+                margin-bottom: 20px;
+            }
+        """)
+        self.caption_label.hide()
+        
+        # Centering caption at bottom
+        cap_layout = QHBoxLayout()
+        cap_layout.addStretch()
+        cap_layout.addWidget(self.caption_label)
+        cap_layout.addStretch()
+        
+        video_main_layout.addLayout(cap_layout)
         
         # Chat Widget
         self.chat_widget = ChatWidget()
@@ -152,11 +191,17 @@ class VideoCallWidget(QWidget):
         self.btn_cam = self.create_control_btn("📹", "Stop Video")
         self.btn_cam.clicked.connect(self.toggle_cam)
         
-        self.btn_cc = self.create_control_btn("💬", "Captions")
+        self.btn_cc = self.create_control_btn("CC", "Captions")
+        self.btn_cc.setStyleSheet(self.btn_cc.styleSheet() + "font-weight: bold;")
         self.btn_cc.clicked.connect(self.toggle_cc)
         
         self.btn_chat = self.create_control_btn("🗨", "Chat")
         self.btn_chat.clicked.connect(self.toggle_chat)
+
+        if self.mode == "HOST":
+            self.btn_mom = self.create_control_btn("📝", "Minutes of Meeting")
+            self.btn_mom.clicked.connect(self.toggle_mom)
+            layout.addWidget(self.btn_mom)
         
         self.btn_leave = QPushButton("📞")
         self.btn_leave.setFixedSize(60, 40)
@@ -232,9 +277,45 @@ class VideoCallWidget(QWidget):
         self.is_cc_on = not self.is_cc_on
         if self.is_cc_on:
             self.btn_cc.setStyleSheet(self.btn_cc.styleSheet().replace("background-color: #3c4043;", "background-color: #8ab4f8;").replace("color: white;", "color: black;"))
-            QMessageBox.information(self, "Captions", "Captions enabled (Simulation)")
+            
+            # Start captions if we have a peer (simulated check)
+            if self.remote_container.isVisible():
+                 self.start_captions()
+            else:
+                 QMessageBox.information(self, "Captions", "Captions will start when a participant joins.")
         else:
             self.btn_cc.setStyleSheet(self.btn_cc.styleSheet().replace("background-color: #8ab4f8;", "background-color: #3c4043;").replace("color: black;", "color: white;"))
+            self.stop_captions()
+
+    def start_captions(self):
+        self.caption_label.show()
+        self.caption_timer.start()
+        self.cycle_caption()
+
+    def stop_captions(self):
+        self.caption_label.hide()
+        self.caption_timer.stop()
+
+    def cycle_caption(self):
+        if not self.captions_lines: return
+        
+        text = self.captions_lines[self.current_caption_index]
+        self.caption_label.setText(text)
+        
+        self.current_caption_index = (self.current_caption_index + 1) % len(self.captions_lines)
+
+    def toggle_mom(self):
+        # Initial state check (button doesn't track state directly like bools in this snippet, but we can toggle style)
+        is_active = "background-color: #8ab4f8;" in self.btn_mom.styleSheet()
+        
+        if not is_active:
+            ret = QMessageBox.warning(self, "Enable MOM", 
+                                      "Using this feature will require sending data to external AI servers.\n\nDo you want to proceed?",
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if ret == QMessageBox.StandardButton.Yes:
+                 self.btn_mom.setStyleSheet(self.btn_mom.styleSheet().replace("background-color: #3c4043;", "background-color: #8ab4f8;").replace("color: white;", "color: black;"))
+        else:
+            self.btn_mom.setStyleSheet(self.btn_mom.styleSheet().replace("background-color: #8ab4f8;", "background-color: #3c4043;").replace("color: black;", "color: white;"))
 
     def toggle_chat(self):
         if self.chat_widget.isVisible():
@@ -362,6 +443,10 @@ class VideoCallWidget(QWidget):
         if self.mode == "CLIENT":
             self.top_connection_bar.setVisible(False) # Hide input when connected
 
+        # Check if captions should start
+        if self.is_cc_on:
+            self.start_captions()
+
     def on_disconnected(self):
         self.remote_video_label.clear()
         self.remote_container.setVisible(False)
@@ -369,7 +454,10 @@ class VideoCallWidget(QWidget):
         if self.mode == "CLIENT":
             self.btn_connect.setText("Join")
             self.btn_connect.setEnabled(True)
+            self.btn_connect.setEnabled(True)
             self.top_connection_bar.setVisible(True)
+            
+        self.stop_captions()
 
     def on_error(self, msg):
         QMessageBox.warning(self, "Connection Error", msg)

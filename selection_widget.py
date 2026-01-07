@@ -1,7 +1,10 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QPushButton, QLabel, 
-                             QHBoxLayout, QFrame, QGraphicsDropShadowEffect)
+                             QHBoxLayout, QFrame, QGraphicsDropShadowEffect, QMenu)
+from PyQt6.QtGui import QAction
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
+from user_profile import UserProfile
+from profile_widget import ProfileWidget
 
 class ModeSelectionWidget(QWidget):
     mode_selected = pyqtSignal(str) # Emits "HOST" or "CLIENT"
@@ -15,9 +18,20 @@ class ModeSelectionWidget(QWidget):
         layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.setSpacing(60)
 
-        # Header Section
-        header = QVBoxLayout()
-        header.setSpacing(15)
+        # Header Frame/Layout to hold potentially Title and Profile
+        top_bar = QHBoxLayout()
+        top_bar.setContentsMargins(20, 20, 20, 0)
+        
+        # Profile Button (Top Right)
+        self.profile_btn = QPushButton()
+        self.profile_btn.setFixedSize(50, 50)
+        self.profile_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.update_profile_button()
+        self.profile_btn.clicked.connect(self.open_profile)
+
+        # Title Section
+        title_layout = QVBoxLayout()
+        title_layout.setSpacing(15)
         
         main_title = QLabel("Team Connect")
         main_title.setStyleSheet("font-size: 42px; font-weight: 800; color: #ffffff; letter-spacing: 1px;")
@@ -27,9 +41,22 @@ class ModeSelectionWidget(QWidget):
         sub_title.setStyleSheet("font-size: 16px; color: #888888; font-weight: 500;")
         sub_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
-        header.addWidget(main_title)
-        header.addWidget(sub_title)
-        layout.addLayout(header)
+        title_layout.addWidget(main_title)
+        title_layout.addWidget(sub_title)
+
+        # Top Bar assembly
+        # We want the profile button to be on the right, title in center
+        # HBox: [Stretch] [Title Layout] [Stretch w/ Profile at end?]
+        # Easier: Just use a Relative layout or add profile to a top HBox and Title below.
+        
+        # Let's put Profile Button in a top bar, and Title below it.
+        top_container = QWidget()
+        top_layout = QHBoxLayout(top_container)
+        top_layout.addStretch()
+        top_layout.addWidget(self.profile_btn)
+        
+        layout.addWidget(top_container)
+        layout.addLayout(title_layout)
 
         # Cards Layout
         cards_layout = QHBoxLayout()
@@ -157,3 +184,65 @@ class ModeSelectionWidget(QWidget):
             w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         return container
+
+    def update_profile_button(self):
+        profile = UserProfile()
+        initials = profile.get_initials()
+        self.profile_btn.setText(initials)
+        self.profile_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #007bff;
+                color: white;
+                border-radius: 25px;
+                font-weight: bold;
+                font-size: 18px;
+                border: 2px solid #ffffff;
+            }
+            QPushButton:hover {
+                background-color: #0056b3;
+            }
+        """)
+
+    def open_profile(self):
+        # Create a menu
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2d2d2d;
+                color: white;
+                border: 1px solid #3d3d3d;
+                border-radius: 6px;
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 8px 20px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #007bff;
+            }
+        """)
+        
+        # Actions
+        act_account = QAction("Account Settings", self)
+        act_account.triggered.connect(lambda: print("Account settings clicked")) # Placeholder
+        
+        act_settings = QAction("Settings", self)
+        act_settings.triggered.connect(self.show_settings_dialog)
+        
+        act_help = QAction("Help", self)
+        act_help.triggered.connect(lambda: print("Help clicked")) # Placeholder
+        
+        menu.addAction(act_account)
+        menu.addSeparator()
+        menu.addAction(act_settings)
+        menu.addSeparator()
+        menu.addAction(act_help)
+        
+        # Show menu at button position
+        menu.exec(self.profile_btn.mapToGlobal(self.profile_btn.rect().bottomLeft()))
+
+    def show_settings_dialog(self):
+        self.profile_window = ProfileWidget() # Keep reference
+        self.profile_window.show()
+

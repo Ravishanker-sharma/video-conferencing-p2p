@@ -39,6 +39,10 @@ class LoginWidget(QWidget):
         subtitle.setStyleSheet("color: #aaaaaa; font-size: 14px; margin-bottom: 20px; border: none;")
 
         # Inputs
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("Full Name")
+        self.name_input.setStyleSheet(self.input_style())
+
         self.email_input = QLineEdit()
         self.email_input.setPlaceholderText("Email Address")
         self.email_input.setStyleSheet(self.input_style())
@@ -47,7 +51,7 @@ class LoginWidget(QWidget):
         self.pass_input.setPlaceholderText("Password")
         self.pass_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.pass_input.setStyleSheet(self.input_style())
-
+        
         # Login Button
         self.btn_login = QPushButton("Sign In")
         self.btn_login.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -69,6 +73,7 @@ class LoginWidget(QWidget):
             }
         """)
         self.btn_login.clicked.connect(self.handle_login)
+        self.pass_input.returnPressed.connect(self.handle_login)
 
         # Mock "Forgot Password"
         forgot_label = QLabel("Forgot Password?")
@@ -79,6 +84,7 @@ class LoginWidget(QWidget):
         card_layout.addStretch()
         card_layout.addWidget(title_label)
         card_layout.addWidget(subtitle)
+        card_layout.addWidget(self.name_input)
         card_layout.addWidget(self.email_input)
         card_layout.addWidget(self.pass_input)
         card_layout.addWidget(self.btn_login)
@@ -103,10 +109,13 @@ class LoginWidget(QWidget):
         """
 
     def handle_login(self):
-        # Mock validation
-        if not self.email_input.text() or not self.pass_input.text():
-            # In a real app we'd show an error, but for simulation we just proceed or maybe shake
-            pass
+        name = self.name_input.text().strip()
+        if not name:
+            # Shake effect or visual cue could be added, for now just simple check
+            self.name_input.setPlaceholderText("Name is required")
+            return
+            
+        from user_profile import UserProfile
+        UserProfile().set_name(name)
         
-        # Proceed regardless for simulation
         self.login_successful.emit()
