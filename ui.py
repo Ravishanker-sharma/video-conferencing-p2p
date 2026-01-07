@@ -22,6 +22,7 @@ class VideoCallWidget(QWidget):
         self.is_mic_on = True
         self.is_camera_on = True
         self.is_cc_on = False
+        self.mom_enabled = False # Track if MOM was toggled ON
         
         # Initialize core components
         try:
@@ -315,8 +316,10 @@ class VideoCallWidget(QWidget):
                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if ret == QMessageBox.StandardButton.Yes:
                  self.btn_mom.setStyleSheet(self.btn_mom.styleSheet().replace("background-color: #3c4043;", "background-color: #8ab4f8;").replace("color: white;", "color: black;"))
+                 self.mom_enabled = True
         else:
             self.btn_mom.setStyleSheet(self.btn_mom.styleSheet().replace("background-color: #8ab4f8;", "background-color: #3c4043;").replace("color: black;", "color: white;"))
+            self.mom_enabled = False
 
     def toggle_chat(self):
         if self.chat_widget.isVisible():
@@ -436,7 +439,19 @@ class VideoCallWidget(QWidget):
         self.connection_manager.start_client(uri)
 
     def stop_connection(self):
+        # Stop everything first
         self.connection_manager.stop_connection()
+        self.timer.stop()
+        
+        # Check MOM
+        if self.mom_enabled:
+             ret = QMessageBox.question(self, "Minutes of Meeting", "Do you want to save the Minute of Meeting (MOM)?")
+             if ret == QMessageBox.StandardButton.Yes:
+                 # Show MOM text
+                 text = UserProfile().mom_text
+                 QMessageBox.information(self, "MOM Content", f"MOM Content:\n\n{text}\n\n(Saved to clipboard/file - simulated)")
+        
+        # Small delay or just emit
         self.call_ended.emit()
 
     def on_connected(self):
@@ -465,7 +480,12 @@ class VideoCallWidget(QWidget):
         self.on_disconnected()
 
     def cleanup(self):
-        self.timer.stop()
-        self.connection_manager.stop_connection()
-        if self.camera:
-            self.camera.release()
+        try:
+            if self.timer.isActive():
+                self.timer.stop()
+            self.connection_manager.stop_connection()
+            if self.camera:
+                self.camera.release()
+                self.camera = None # Prevent double release
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
