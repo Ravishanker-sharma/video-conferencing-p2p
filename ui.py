@@ -10,8 +10,6 @@ from user_profile import UserProfile
 import video
 import network
 from chat_widget import ChatWidget
-import subprocess
-import shutil
 
 class VideoCallWidget(QWidget):
     call_ended = pyqtSignal()
@@ -413,21 +411,6 @@ class VideoCallWidget(QWidget):
         port = 8000
         # self.top_connection_bar.setVisible(True) # Hidden for clean UI
         self.connection_manager.start_host(port)
-        self.start_ngrok(port)
-
-    def start_ngrok(self, port):
-        if shutil.which("ngrok"):
-            try:
-                # Start ngrok in background
-                # We won't capture output here to avoid blocking, user can see status in terminal if needed or just use ngrok dashboard
-                # Use --log=stdout to avoid UI taking over if running in terminal (though Popen usually handles this)
-                self.ngrok_process = subprocess.Popen(["ngrok", "http", str(port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                print(f"Ngrok started on port {port} (PID: {self.ngrok_process.pid})")
-            except Exception as e:
-                print(f"Failed to start ngrok: {e}")
-        else:
-            print("Ngrok not found in PATH. Skipping port forwarding.")
-            self.ngrok_process = None
 
     def start_client(self):
         addr = self.ip_input.text().strip()
@@ -454,18 +437,7 @@ class VideoCallWidget(QWidget):
 
     def stop_connection(self):
         self.connection_manager.stop_connection()
-        self.stop_ngrok()
         self.call_ended.emit()
-
-    def stop_ngrok(self):
-        if hasattr(self, 'ngrok_process') and self.ngrok_process:
-            print(f"Stopping ngrok (PID: {self.ngrok_process.pid})...")
-            self.ngrok_process.terminate()
-            try:
-                self.ngrok_process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                self.ngrok_process.kill()
-            self.ngrok_process = None
 
     def on_connected(self):
         self.remote_container.setVisible(True)
