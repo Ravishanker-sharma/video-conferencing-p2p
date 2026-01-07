@@ -103,14 +103,15 @@ class VideoCallWidget(QWidget):
         # Captions Label (Overlay style)
         self.caption_label = QLabel("")
         self.caption_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.caption_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum)
         self.caption_label.setStyleSheet("""
             QLabel {
-                background-color: rgba(0, 0, 0, 0.4);
-                color: rgba(255, 255, 255, 0.9);
-                font-size: 16px;
-                padding: 6px 16px;
-                border-radius: 16px;
-                margin-bottom: 20px;
+                background-color: rgba(0, 0, 0, 0.6);
+                color: white;
+                font-size: 14px;
+                padding: 4px 8px;
+                border-radius: 4px;
+                margin-bottom: 10px;
             }
         """)
         self.caption_label.hide()
