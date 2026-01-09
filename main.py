@@ -8,7 +8,7 @@ class MainAppWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         print("MainAppWindow.__init__ start")
-        self.setWindowTitle("Team Connect")
+        self.setWindowTitle("VIRN")
         self.setGeometry(100, 100, 1000, 700)
         
         # Central Stack

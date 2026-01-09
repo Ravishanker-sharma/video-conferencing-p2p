@@ -33,7 +33,7 @@ class ModeSelectionWidget(QWidget):
         title_layout = QVBoxLayout()
         title_layout.setSpacing(15)
         
-        main_title = QLabel("Team Connect")
+        main_title = QLabel("VIRN")
         main_title.setStyleSheet("font-size: 42px; font-weight: 800; color: #ffffff; letter-spacing: 1px;")
         main_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         

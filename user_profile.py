@@ -12,7 +12,7 @@ It helps to demonstrate the feature.
 When you speak, words appear here.
 Post-Quantum cryptography keeps it safe.
 Video conferencing is the future.
-Team Connect is awesome.
+VIRN is awesome.
 """
             cls._instance.mom_text = """Meeting Minutes
 Date: Today
